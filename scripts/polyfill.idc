@@ -1,0 +1,93 @@
+// (c) 2024 Daniele Lombardi
+//
+// This code is licensed under GPL 3
+
+#include <idc.idc>
+
+static str_replace_first(haystack, needle, repl) {
+	auto p = strstr(haystack, needle, 0);
+	if (p >= 0) {
+		haystack = substr(haystack, 0, p) + repl + substr(haystack, p + strlen(needle), -1);
+	}
+	return haystack;
+}
+
+///Return whether the given character is a space, a tab, a carrige return or a line feed.
+static isblank(c) {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+///Returns whether the given character is an ASCII digit.
+static isdigit(c) {
+	auto code = ord(c);
+	return '0' <= code && code <= '9';
+}
+
+///Converts the given string to a float or long value.
+static atof(s) {
+	auto neg = 0;
+	if (s[0] == "-") {
+		s = substr(s, 1, -1);
+		neg = 1;
+	}
+	auto val;
+	auto p = strstr(s, ".", 1);
+	if (p >= 0) {
+		auto ipart = 1.0 * atol(substr(s, 0, p));
+		auto dpart = 1.0 * atol(substr(s, p + 1, -1));
+		auto ndec = strlen(dpart);
+		for (; ndec > 0; ndec--) {
+			dpart = dpart / 10.0;
+		}
+		val = ipart + dpart;
+	} else {
+		val = atol(s);
+	}
+	if (neg) val = -val;
+	return val;
+}
+
+///Returns a long hashcode for the given string
+static hashcode(value) {
+	auto hash = 0;
+	auto multiplier = 1;
+	auto i;
+	for (i = strlen(value) - 1; i >= 0; i--) {
+		hash = hash + ord(value[i]) * multiplier;
+		auto shifted = multiplier << 5;
+		multiplier = shifted - multiplier;
+	}
+	return hash >= 0 ? hash : -hash;
+}
+
+/**Tries to call the method getClass() on the given object and returns the returned value.
+ * If the given value isn't an object, return an empty string.
+ * If the given value is an object which doesn't implement the getClass() method, return the string "object".
+ */
+static getClass(obj) {
+	if (value_is_object(obj)) {
+		auto err;
+		try {
+			return obj.getClass();
+		} catch (err) {
+			return "object";
+		}
+	}
+	return "";
+}
+
+///Returns wheter the given value is a float or long.
+static value_is_number(val) {
+	return value_is_long(val) || value_is_float(val);
+}
+
+static getNthWord(s, n) {
+	auto p1 = strstr(s, " ", 0);
+	if (p1 < 0) p1 = strlen(s);
+	while (n-- > 0) {
+		s = substr(s, p1 + 1, -1);
+		p1 = strstr(s, " ", 0);
+		if (p1 < 0) p1 = strlen(s);
+	}
+	return substr(s, 0, p1);
+}

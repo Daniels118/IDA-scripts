@@ -1,0 +1,268 @@
+// (c) 2024 Daniele Lombardi
+//
+// This code is licensed under GPL 3
+
+#include <idc.idc>
+
+#include "collections.idc"
+
+/**Helper class to process JSON files. It implements the following features:
+ * - Input streaming
+ * There is no need to load the whole file in memory for processing. This minimizes the memory usages.
+ * - Stream and DOM processing
+ * Supports both callback for stream processing of JSON nodes, and DOM building for post-processing.
+ * Modes aren't mutually exclusive, you can decide which nodes should be discarded or feed into DOM.
+ * Discarding nodes can be done dynamically in the streaming callback, or statically using NullList
+ * containers.
+ * - Static binding, dynamic binding, lazy binding or typeless
+ * You can decide which class should be used to hold data for each node. By default the parser will use
+ * LinkedList for arrays and HashMap for associative arrays. HashMap keys can be accessed as normal
+ * class members. When initiating the parsing of a node you can optionally pass an instance of a class
+ * of your choice to store the data. This can be done dinamically using the streaming callbacks, or
+ * statically by specifying the item allocator on the collection.
+ * Another option is to provide the object used to store data based on the value of a field within the
+ * node. This is known as lazy binding, and can be implemented by replacing the default container in
+ * the streaming callback.
+ */
+class JsonStream {
+	JsonStream(filename, filter) {
+		this._class = "JsonStream";
+		this.file = fopen(filename, "r");
+		this.line = 1;
+		this.col = 0;
+		this.instr = 0;
+		this.escape = 0;
+		this.backBuffer = ' ';
+		this.backCount = 0;
+		this.filter = filter;
+	}
+	
+	getClass() {
+		return "JsonStream";
+	}
+	
+	readRaw() {
+		auto c = this.backCount > 0 ? this.backBuffer : fgetc(this.file);
+		this.backCount = 0;
+		this.col++;
+		if (c == '\n') {
+			this.line++;
+			this.col = 0;
+		}
+		return c;
+	}
+	
+	read() {
+		auto c = this.readRaw();
+		if (this.instr) {
+			if (this.escape) {
+				this.escape = 0;
+			} else if (c == '\\') {
+				this.escape = 1;
+			} else if (c == '"') {
+				this.instr = 0;
+			}
+		} else if (c == '"') {
+			this.instr = 1;
+		} else {
+			while (isblank(c)) {
+				c = this.readRaw();
+			}
+			if (c == '"') {
+				this.instr = 1;
+			}
+		}
+		return c;
+	}
+	
+	unread(c) {
+		if (c == '"') {
+			this.instr = !this.instr;
+		}
+		this.backBuffer = c;
+		this.backCount = 1;
+		this.col = this.col - 1;
+	}
+	
+	close() {
+		fclose(this.file);
+	}
+	
+	err(message) {
+		throw message + " at line " + ltoa(this.line, 10) + ", col " + ltoa(this.col, 10);
+	}
+
+	readNumber() {
+		auto result = "";
+		auto c = this.read();
+		while (isdigit(c) || c == '.' || c == '-') {
+			result = result + c;
+			c = this.read();
+		}
+		this.unread(c);
+		return atof(result);
+	}
+
+	readString() {
+		auto result = "";
+		auto escape = 0;
+		auto c = this.read();
+		while (c >= 0) {
+			if (escape) {
+				result = result + c;
+				escape = 0;
+			} else if (c == '\\') {
+				escape = 1;
+			} else if (c == '"') {
+				break;
+			} else {
+				result = result + c;
+			}
+			c = this.read();
+		}
+		return result;
+	}
+
+	readArray(depth, arr) {
+		//msg("JsonReadArray %d\n", depth);
+		auto i = 0;
+		auto val = 0;
+		auto c = this.read();
+		if (c == ']') return arr;
+		this.unread(c);
+		while (c >= 0 && c != ']') {
+			if (this.filter != 0) {
+				this.filter.enter(depth, "array", i, &val);
+			}
+			if (arr._allocator != 0) {
+				val = arr._allocator();
+			}
+			val = this.readAny(depth + 1, val);
+			if (this.filter == 0 || this.filter.exit(depth, "array", i, val, &arr)) {
+				arr.add(val);
+			}
+			val = 0;
+			c = this.read();
+			if (c != ',' && c != ']') {
+				this.err("JSE01: Unexpected character '"+c+"', expected ',' or '}'");
+			}
+			i++;
+		}
+		return arr;
+	}
+
+	readObject(depth, obj) {
+		//msg("JsonReadObject %d\n", depth);
+		auto err;
+		auto newContainer = obj;
+		auto objIsMap = getClass(obj) == "HashMap";
+		auto childContainer = 0;
+		auto c = this.read();
+		while (c >= 0 && c != '}') {
+			if (c != '"') {
+				this.err("JSE05: Unexpected character '"+c+"', expected '\"'");
+			}
+			auto key = this.readString();
+			auto addKey = 1;
+			if (this.filter != 0) {
+				addKey = this.filter.enter(depth, "object", key, 0);
+			}
+			c = this.read();
+			if (c != ':') {
+				this.err("JSE02: Unexpected character '"+c+"', expected ':' after key \"" + key + "\"");
+			}
+			if (addKey) {
+				if (objIsMap) {
+					childContainer = obj.getOrDefault(key, 0);
+				} else {
+					//msg("Using %s::%s\n", getClass(obj), key);
+					try {
+						childContainer = getattr(obj, key);
+					} catch (err) {
+						addKey = 0;
+					}
+				}
+			}
+			auto val = this.readAny(depth + 1, childContainer);
+			if (addKey) {
+				if (this.filter == 0 || this.filter.exit(depth, "object", key, val, &newContainer)) {
+					if (newContainer != obj) {
+						//Lazy binding
+						auto iter = obj.iterator();
+						while (iter.hasNext()) {
+							auto entry = iter.next();
+							try {
+								setattr(newContainer, entry.first, entry.second);
+							} catch (err) {}
+						}
+						obj = newContainer;
+						objIsMap = 0;
+					}
+					if (objIsMap) {
+						obj.put(key, val);
+					} else {
+						setattr(obj, key, val);
+					}
+				}
+			}
+			c = this.read();
+			if (c != ',' && c != '}') {
+				this.err("JSE03: Unexpected character '"+c+"', expected ',' or '}'");
+			}
+			if (c == ',') {
+				c = this.read();
+			}
+		}
+		return obj;
+	}
+
+	readAny(depth, container = 0) {
+		//msg("JsonRead %d\n", depth);
+		if (depth > 20) {
+			throw "Stack overflow";
+		}
+		auto c = this.read();
+		if (c == '{') {
+			if (container == 0) {
+				container = HashMap();
+			}
+			return this.readObject(depth, container);
+		} else if (c == '[') {
+			if (container == 0) {
+				container = LinkedList();
+			}
+			return this.readArray(depth, container);
+		} else if (c == '"') {
+			return this.readString();
+		} else if (isdigit(c) || c == '-') {
+			this.unread(c);
+			return this.readNumber();
+		}
+		this.err("JSE04: Unexpected character: " + c);
+	}
+	
+	parse(container = 0) {
+		return this.readAny(0, container);
+	}
+}
+
+//Example filter class
+/*
+class MyFilter {
+	MyFilter() {}
+	
+	///Called before processing a node.
+	///You can optionally provide an instance to store node data by setting pVal.
+	///Return 0 to discard the value after processing.
+	enter(depth, type, key, pVal) {
+		return 1;
+	}
+	
+	///Called after processing a node.
+	///You can optionally replace the container object by setting pContainer.
+	///Return 0 to discard the value.
+	exit(depth, type, key, val, pContainer) {
+		return 1;
+	}
+}
+*/
