@@ -1,15 +1,73 @@
 // (c) 2024 Daniele Lombardi
 //
-// This code is licensed under GPL 3
+// This code is licensed under GPL 3.0
+
+///Call PolyfillInit() to initialize this module.
 
 #include <idc.idc>
 
+///Global object used to represent null values.
+extern nullobj;
+
+///Class used to represent the null value;
+class NullObj {
+	NullObj() {
+		this._class = "NullObj";
+	}
+}
+
+///Call this method to initialize this module.
+static PolyfillInit() {
+	if (!value_is_object(nullobj)) {
+		nullobj = NullObj();
+	}
+}
+
+static starts_with(str, prefix) {
+	auto l1 = strlen(str);
+	auto l2 = strlen(prefix);
+	if (l1 >= l2) {
+		return substr(str, 0, l2) == prefix;
+	}
+	return 0;
+}
+
+static ends_with(str, suffix) {
+	auto l1 = strlen(str);
+	auto l2 = strlen(suffix);
+	if (l1 >= l2) {
+		return substr(str, l1 - l2, -1) == suffix;
+	}
+	return 0;
+}
+
+///Replace the first occurrence of a substring in a string.
 static str_replace_first(haystack, needle, repl) {
-	auto p = strstr(haystack, needle, 0);
+	auto p = strstr(haystack, needle);
 	if (p >= 0) {
 		haystack = substr(haystack, 0, p) + repl + substr(haystack, p + strlen(needle), -1);
 	}
 	return haystack;
+}
+
+///Replace all occurrences of a substring in a string.
+static str_replace(haystack, needle, repl) {
+	auto result = "";
+	auto p = strstr(haystack, needle);
+	while (p >= 0) {
+		result = result + substr(haystack, 0, p) + repl;
+		haystack = substr(haystack, p + strlen(needle), -1);
+		p = strstr(haystack, needle);
+	}
+	return result + haystack;
+}
+
+///Returns the position of a substring in a string, starting the search from a given index.
+static strpos(haystack, needle, start = 0) {
+	haystack = substr(haystack, start, -1);
+	auto p = strstr(haystack, needle);
+	if (p < 0) return p;
+	return start + p;
 }
 
 ///Return whether the given character is a space, a tab, a carrige return or a line feed.
@@ -31,7 +89,7 @@ static atof(s) {
 		neg = 1;
 	}
 	auto val;
-	auto p = strstr(s, ".", 1);
+	auto p = strstr(s, ".");
 	if (p >= 0) {
 		auto ipart = 1.0 * atol(substr(s, 0, p));
 		auto dpart = 1.0 * atol(substr(s, p + 1, -1));
@@ -82,11 +140,11 @@ static value_is_number(val) {
 }
 
 static getNthWord(s, n) {
-	auto p1 = strstr(s, " ", 0);
+	auto p1 = strstr(s, " ");
 	if (p1 < 0) p1 = strlen(s);
 	while (n-- > 0) {
 		s = substr(s, p1 + 1, -1);
-		p1 = strstr(s, " ", 0);
+		p1 = strstr(s, " ");
 		if (p1 < 0) p1 = strlen(s);
 	}
 	return substr(s, 0, p1);

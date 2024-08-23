@@ -1,21 +1,68 @@
 // (c) 2024 Daniele Lombardi
 //
-// This code is licensed under GPL 3
+// This code is licensed under GPL 3.0
 
 #include <idc.idc>
 
 #include "polyfill.idc"
 
+/**Dynamic allocator which uses eval to allocate the given class. If you need
+ * high performances, define a specific allocator class or static function.
+ */
+class Allocator {
+	Allocator(className) {
+		this.code = className + "()";
+	}
+	
+	allocate() {
+		return eval(this.code);
+	}
+	
+	getClass() {
+		return "Allocator";
+	}
+}
+
+
+///Base class for all collection types.
+class Collection {
+	Collection(allocator = 0) {
+		this._allocator = allocator;
+	}
+	
+	newItem() {
+		if (value_is_object(this._allocator)) {
+			return this._allocator.allocate();
+		} else if (value_is_func(this._allocator)) {
+			return this._allocator();
+		} else if (this.allocator == 0) {
+			throw "Allocator not set";
+		} else {
+			throw "Invalid allocator type";
+		}
+	}
+	
+	isList() { return 0; }
+	
+	isRandomAccess() { return 0; }
+	
+	isStack() { return 0; }
+	
+	isQueue() { return 0; }
+	
+	isMap() { return 0; }
+}
+
+
 ///This class implements an array with fixed capacity and variable size.
-class Array {
-	Array(capacity, size = 0, allocator = 0) {
+class Array : Collection {
+	Array(capacity, size = 0, allocator = 0) : Collection(allocator) {
 		this.capacity = capacity;
 		this.size = size;
 		auto i;
 		for (i = 0; i < capacity; i++) {
 			this[i] = 0;
 		}
-		this._allocator = allocator;
 	}
 	
 	~Array() {
@@ -25,6 +72,12 @@ class Array {
 	getClass() {
 		return "Array";
 	}
+	
+	isList() { return 1; }
+	
+	isRandomAccess() { return 1; }
+	
+	isStack() { return 1; }
 	
 	clear() {
 		this.resize(0);
@@ -76,16 +129,6 @@ class Array {
 }
 
 
-///This class implements a zero capacity array which discards any value inserted without throwing exceptions.
-class NullList : Array {
-	NullList(allocator = 0) : Array(0, 0, allocator) {}
-	
-	add(val) {}
-	
-	push(val) {}
-}
-
-
 ///This class is used by LinkedList to hold individual items.
 class ListEntry {
 	ListEntry(prev, next, val) {
@@ -101,13 +144,11 @@ class ListEntry {
 
 
 ///Doubly linked list implementation
-class LinkedList {
-	LinkedList(allocator = 0) {
-		this._class = "LinkedList";
+class LinkedList : Collection {
+	LinkedList(allocator = 0) : Collection(allocator) {
 		this.head = 0;
 		this.tail = 0;
 		this.size = 0;
-		this._allocator = allocator;
 	}
 	
 	~LinkedList() {
@@ -117,6 +158,12 @@ class LinkedList {
 	getClass() {
 		return "LinkedList";
 	}
+	
+	isList() { return 1; }
+	
+	isStack() { return 1; }
+	
+	isQueue() { return 1; }
 	
 	clear() {
 		while (this.head != 0) {
@@ -149,7 +196,9 @@ class LinkedList {
 		for (; index > 0; index--) {
 			entry = entry.next;
 		}
+		auto oldVal = entry.val;
 		entry.val = val;
+		return oldVal;
 	}
 	
 	removeEntry(entry) {
@@ -166,6 +215,7 @@ class LinkedList {
 		entry.prev = 0;
 		entry.next = 0;
 		entry.val = 0;
+		this.size--;
 	}
 	
 	remove(index) {
@@ -173,7 +223,9 @@ class LinkedList {
 		for (; index > 0; index--) {
 			entry = entry.next;
 		}
-		removeEntry(entry);
+		auto val = entry.val;
+		this.removeEntry(entry);
+		return val;
 	}
 	
 	push(val) {
@@ -185,6 +237,26 @@ class LinkedList {
 		this.removeEntry(this.tail);
 		return val;
 	}
+	
+	queue(val) {
+		this.add(val);
+	}
+	
+	dequeue() {
+		return remove(0);
+	}
+}
+
+
+///This class implements a list which discards any value inserted without throwing exceptions.
+class NullList : LinkedList {
+	NullList(allocator = 0) : LinkedList(allocator) {}
+	
+	add(val) {}
+	
+	push(val) {}
+	
+	queue(val) {}
 }
 
 
@@ -204,12 +276,11 @@ class Pair {
 /**This is a simple Map implementation based on LinkedList. It has poor performances, but preserves the insertion order.
  * The keys can be accessed both with get/set methods or as class members.
  */
-class LinkedMap {
-	LinkedMap(allocator = 0) {
+class LinkedMap : Collection {
+	LinkedMap(allocator = 0) : Collection(allocator) {
 		this._class = "LinkedMap";
 		this._entries = LinkedList();
 		this._size = 0;
-		this._allocator = allocator;
 	}
 	
 	~LinkedMap() {
@@ -219,6 +290,8 @@ class LinkedMap {
 	getClass() {
 		return "LinkedMap";
 	}
+	
+	isMap() { return 1; }
 	
 	clear() {
 		this._entries.clear();
@@ -244,11 +317,10 @@ class LinkedMap {
 	getIndex(key) {
 		auto entry = this._entries.head;
 		auto i;
-		for (i = 0; i < this._size; i++) {
+		for (i = 0; i < this._size; i++, entry = entry.next) {
 			if (entry.val.first == key) {
 				return i;
 			}
-			entry = entry.next;
 		}
 		return -1;
 	}
@@ -256,11 +328,10 @@ class LinkedMap {
 	getEntry(key) {
 		auto entry = this._entries.head;
 		auto i;
-		for (i = 0; i < this._size; i++) {
+		for (i = 0; i < this._size; i++, entry = entry.next) {
 			if (entry.val.first == key) {
 				return entry;
 			}
-			entry = entry.next;
 		}
 		return 0;
 	}
@@ -272,11 +343,13 @@ class LinkedMap {
 	put(key, val) {
 		auto entry = this.getEntry(key);
 		if (entry != 0) {
+			auto oldVal = entry.val.second;
 			entry.val.second = val;
-		} else {
-			this._entries.add(Pair(key, val));
-			this._size++;
+			return oldVal;
 		}
+		this._entries.add(Pair(key, val));
+		this._size++;
+		return 0;
 	}
 	
 	get(key) {
@@ -297,7 +370,10 @@ class LinkedMap {
 	
 	remove(key) {
 		auto entry = this.getEntry(key);
+		auto oldVal = entry.second;
 		this._entries.removeEntry(entry);
+		this._size--;
+		return oldVal;
 	}
 }
 
@@ -331,8 +407,8 @@ class HashMapIterator {
 /**Efficient Map implementation. The keys can be accessed both with get/set methods or as class members.
  * The number of buckets can be decided at creation time, but then it stays fixed.
  */
-class HashMap {
-	HashMap(nBuckets = 10, allocator = 0) {
+class HashMap : Collection {
+	HashMap(nBuckets = 10, allocator = 0) : Collection(allocator) {
 		this._class = "HashMap";
 		if (nBuckets < 1) throw "Invalid buckets count";
 		this._buckets = Array(nBuckets);
@@ -342,7 +418,6 @@ class HashMap {
 			this._buckets[i] = LinkedList();
 		}
 		this._size = 0;
-		this._allocator = allocator;
 	}
 	
 	~HashMap() {
@@ -354,6 +429,8 @@ class HashMap {
 	getClass() {
 		return "HashMap";
 	}
+	
+	isMap() { return 1; }
 	
 	clear() {
 		auto i;
@@ -388,11 +465,10 @@ class HashMap {
 		auto bucket = this.getBucket(key);
 		auto entry = bucket.head;
 		auto i;
-		for (i = 0; i < bucket.size; i++) {
+		for (i = 0; i < bucket.size; i++, entry = entry.next) {
 			if (entry.val.first == key) {
 				return entry;
 			}
-			entry = entry.next;
 		}
 		return 0;
 	}
@@ -404,12 +480,14 @@ class HashMap {
 	put(key, val) {
 		auto entry = this.getEntry(key);
 		if (entry != 0) {
+			auto oldVal = entry.val.second;
 			entry.val.second = val;
-		} else {
-			auto bucket = this.getBucket(key);
-			bucket.add(Pair(key, val));
-			this._size++;
+			return oldVal;
 		}
+		auto bucket = this.getBucket(key);
+		bucket.add(Pair(key, val));
+		this._size++;
+		return 0;
 	}
 	
 	get(key) {
@@ -430,8 +508,11 @@ class HashMap {
 	
 	remove(key) {
 		auto entry = this.getEntry(key);
+		auto oldVal = entry.second;
 		auto bucket = this.getBucket(key);
 		bucket.removeEntry(entry);
+		this._size--;
+		return oldVal;
 	}
 	
 	iterator() {

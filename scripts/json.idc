@@ -1,10 +1,14 @@
 // (c) 2024 Daniele Lombardi
 //
-// This code is licensed under GPL 3
+// This code is licensed under GPL 3.0
 
 #include <idc.idc>
 
 #include "collections.idc"
+
+static JsonInit() {
+	PolyfillInit();
+}
 
 /**Helper class to process JSON files. It implements the following features:
  * - Input streaming
@@ -25,7 +29,8 @@
  * the streaming callback.
  */
 class JsonStream {
-	JsonStream(filename, filter) {
+	JsonStream(filename, processor = 0) {
+		JsonInit();
 		this._class = "JsonStream";
 		this.file = fopen(filename, "r");
 		this.line = 1;
@@ -34,7 +39,7 @@ class JsonStream {
 		this.escape = 0;
 		this.backBuffer = ' ';
 		this.backCount = 0;
-		this.filter = filter;
+		this.processor = processor;
 	}
 	
 	getClass() {
@@ -89,7 +94,7 @@ class JsonStream {
 	}
 	
 	err(message) {
-		throw message + " at line " + ltoa(this.line, 10) + ", col " + ltoa(this.col, 10);
+		throw sprintf("%s at line %d, col %d", message, this.line, this.col);
 	}
 
 	readNumber() {
@@ -101,6 +106,24 @@ class JsonStream {
 		}
 		this.unread(c);
 		return atof(result);
+	}
+	
+	readNull() {
+		auto val = "null";
+		auto i;
+		for (i = 0; i < 4; i++) {
+			auto c = "" + this.read();
+			auto e = val[i];
+			if (c != e) {
+				this.err("JSE06: unexpected character '"+c+"', expected '"+e+"'");
+			}
+		}
+		c = this.read();
+		if (c >= 0 && c != ',' && c != ']' && c != '}') {
+			this.err("JSE07: unexpected character '"+c+"', expected ',' or ']' or '}'");
+		}
+		this.unread(c);
+		return nullobj;
 	}
 
 	readString() {
@@ -131,20 +154,24 @@ class JsonStream {
 		if (c == ']') return arr;
 		this.unread(c);
 		while (c >= 0 && c != ']') {
-			if (this.filter != 0) {
-				this.filter.enter(depth, "array", i, &val);
+			if (this.processor != 0) {
+				this.processor.enter(depth, "array", i, &val);
 			}
 			if (arr._allocator != 0) {
-				val = arr._allocator();
+				val = arr.newItem();
 			}
 			val = this.readAny(depth + 1, val);
-			if (this.filter == 0 || this.filter.exit(depth, "array", i, val, &arr)) {
+			auto addVal = 1;
+			if (this.processor != 0) {
+				addVal = this.processor.exit(depth, "array", i, val, &arr);
+			}
+			if (addVal) {
 				arr.add(val);
 			}
 			val = 0;
 			c = this.read();
 			if (c != ',' && c != ']') {
-				this.err("JSE01: Unexpected character '"+c+"', expected ',' or '}'");
+				this.err("JSE01: Unexpected character '"+c+"', expected ',' or ']'");
 			}
 			i++;
 		}
@@ -164,8 +191,8 @@ class JsonStream {
 			}
 			auto key = this.readString();
 			auto addKey = 1;
-			if (this.filter != 0) {
-				addKey = this.filter.enter(depth, "object", key, 0);
+			if (this.processor != 0) {
+				addKey = this.processor.enter(depth, "object", key, 0);
 			}
 			c = this.read();
 			if (c != ':') {
@@ -180,12 +207,17 @@ class JsonStream {
 						childContainer = getattr(obj, key);
 					} catch (err) {
 						addKey = 0;
+						childContainer = 0;
 					}
 				}
 			}
 			auto val = this.readAny(depth + 1, childContainer);
 			if (addKey) {
-				if (this.filter == 0 || this.filter.exit(depth, "object", key, val, &newContainer)) {
+				auto addVal = 1;
+				if (this.processor != 0) {
+					addVal = this.processor.exit(depth, "object", key, val, &newContainer);
+				}
+				if (addVal) {
 					if (newContainer != obj) {
 						//Lazy binding
 						auto iter = obj.iterator();
@@ -234,6 +266,9 @@ class JsonStream {
 			return this.readArray(depth, container);
 		} else if (c == '"') {
 			return this.readString();
+		} else if (c == 'n') {
+			this.unread(c);
+			return this.readNull();
 		} else if (isdigit(c) || c == '-') {
 			this.unread(c);
 			return this.readNumber();
@@ -246,10 +281,10 @@ class JsonStream {
 	}
 }
 
-//Example filter class
+//Example processor class
 /*
-class MyFilter {
-	MyFilter() {}
+class MyProcessor {
+	MyProcessor() {}
 	
 	///Called before processing a node.
 	///You can optionally provide an instance to store node data by setting pVal.
