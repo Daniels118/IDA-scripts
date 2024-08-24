@@ -8,13 +8,13 @@
  * FEATURES:
  * - handles circular references
  * - automatically define missing types as dummy structures
+ * - set name and type for function parameters
+ * - set name and type for global vars
  *
  * TODO:
- * - assign types to global vars
  * - check defined struct size
  *
  * LIMITATIONS:
- * - can't set function parameter types
  * - the type name "Field" is reserved, must be renamed
  */
 
@@ -291,11 +291,42 @@ class JFunction {
 		this.undecorated_name = "";
 		this.call_type = "";
 		this.win_addr = 0;
+		this.argument_types = LinkedList();
 		this.argument_names = LinkedList();
 	}
 	
 	getClass() {
 		return "JFunction";
+	}
+	
+	getName() {
+		auto p = strstr(this.decorated_name, "(");
+		return substr(this.decorated_name, 0, p);
+	}
+	
+	getArgs() {
+		auto args = "";
+		auto argTypeEntry = this.argument_types.head;
+		auto argNameEntry = this.argument_names.head;
+		if (argTypeEntry != 0) {
+			args = argTypeEntry.val + " " + argNameEntry.val;
+			argTypeEntry = argTypeEntry.next;
+			argNameEntry = argNameEntry.next;
+			while (argTypeEntry != 0) {
+				args = args + ", " + argTypeEntry.val + " " + argNameEntry.val;
+				argTypeEntry = argTypeEntry.next;
+				argNameEntry = argNameEntry.next;
+			}
+		}
+		return args;
+	}
+	
+	toString() {
+		auto ctype = this.call_type;
+		if (ctype != "" && !starts_with(ctype, "_")) {
+			ctype = "__" + ctype;
+		}
+		return sprintf("%s %s %s(%s);", this.return_type, ctype, this.getName(), this.getArgs());
 	}
 }
 
@@ -474,21 +505,26 @@ class IdaJsonProcessor {
 	postProcessFunction(val) {
 		auto uname = this.fixMangledName(val.undecorated_name);
 		auto addr = val.win_addr;
-		msg("%s %s = .text:%08x;\n", val.return_type, val.decorated_name, addr);
+		auto dec = val.toString();
+		msg("%s  //.text:%08x;\n", dec, addr);
 		if (set_name(addr, uname, 0)) {
+			//Set stack offset names (optional)
 			auto entry = val.argument_names.head;
 			if (val.call_type == "__thiscall") {
 				entry = entry.next;
 			}
 			auto offset = 4;
-			auto i = 0;
-			for (; entry != 0; entry = entry.next, offset = offset + 4, i++) {
+			for (; entry != 0; entry = entry.next, offset = offset + 4) {
 				if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), entry.val)) {
-					msg("Failed to set name for argument %d: %s\n", i, entry.val);
+					msg("Failed to set name '%s' for stack offset %d at address %08x\n", entry.val, offset, addr);
 				}
 			}
+			//Set function parameter names and types
+			if (!apply_type(addr, dec)) {
+				msg("Failed to set parameters for function %s at address %08x\n", val.decorated_name, addr);
+			}
 		} else {
-			msg("Failed to set function name: %s\n", val.decorated_name);
+			msg("Failed to set function name %s at address %08x\n", val.decorated_name, addr);
 		}
 	}
 	
@@ -496,6 +532,9 @@ class IdaJsonProcessor {
 		msg("%s %s = .data:%08x;\n", val.type, val.name, val.value);
 		if (!set_name(val.value, val.name, 0)) {
 			throw "Failed to set global name: " + val.name;
+		}
+		if (!apply_type(val.value, val.type)) {
+			msg("# Failed to set global type %s for variable %s at %08x\n", val.type, val.name, val.value);
 		}
 	}
 	
