@@ -23,6 +23,13 @@ static PolyfillInit() {
 	}
 }
 
+static assert(cond, txt) {
+	if (!cond) {
+		msg("Assertion failed: %s\n", txt);
+		throw txt;
+	}
+}
+
 static starts_with(str, prefix) {
 	auto l1 = strlen(str);
 	auto l2 = strlen(prefix);
