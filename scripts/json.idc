@@ -192,7 +192,7 @@ class JsonStream {
 			auto key = this.readString();
 			auto addKey = 1;
 			if (this.processor != 0) {
-				addKey = this.processor.enter(depth, "object", key, 0);
+				addKey = this.processor.enter(depth, "object", &key, 0);
 			}
 			c = this.read();
 			if (c != ':') {
@@ -287,9 +287,10 @@ class MyProcessor {
 	MyProcessor() {}
 	
 	///Called before processing a node.
+	///For associative arrays, you can optionally rename the key by setting pKey.
 	///You can optionally provide an instance to store node data by setting pVal.
 	///Return 0 to discard the value after processing.
-	enter(depth, type, key, pVal) {
+	enter(depth, type, pKey, pVal) {
 		return 1;
 	}
 	
