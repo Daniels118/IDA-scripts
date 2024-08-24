@@ -31,7 +31,6 @@ static JsonInit() {
 class JsonStream {
 	JsonStream(filename, processor = 0) {
 		JsonInit();
-		this._class = "JsonStream";
 		this.file = fopen(filename, "r");
 		this.line = 1;
 		this.col = 0;
