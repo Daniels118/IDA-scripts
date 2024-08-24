@@ -109,6 +109,10 @@ class JStructDecl {
 		return "JStructDecl";
 	}
 	
+	getName() {
+		return getNthWord(this.type, 1);
+	}
+	
 	toString() {
 		auto code = this.type + " {\n";
 		auto memberEntry = this.members.head;
@@ -158,6 +162,10 @@ class JUnionDecl {
 		return "JUnionDecl";
 	}
 	
+	getName() {
+		return getNthWord(this.type, 1);
+	}
+	
 	toString() {
 		auto code = this.type + " {\n";
 		auto aliasEntry = this.aliases.head;
@@ -170,8 +178,37 @@ class JUnionDecl {
 }
 
 
+class JTypedefDecl {
+	JTypedefDecl() {
+		this.kind = "TYPEDEF_DECL";
+		this.type = "";
+		this.typedef_ = "";
+	}
+	
+	getClass() {
+		return "JTypedefDecl";
+	}
+	
+	getName() {
+		return this.type;
+	}
+	
+	toString() {
+		if (ends_with(this.typedef_, ")")) {
+			//typedef for function prototype needs special handling
+			auto p = strstr(this.typedef_, "(*)(");
+			auto rett = substr(this.typedef_, 0, p);
+			auto args = substr(this.typedef_, p + 3, -1);
+			return sprintf("typedef %s (*%s)%s;", rett, this.type, args);
+		}
+		return sprintf("typedef %s %s;", this.typedef_, this.type);
+	}
+}
+
+
 class JFunctionProto {
 	JFunctionProto() {
+		this.kind = "FUNCTIONPROTO";
 		this.type = "";
 		this.result = "";
 		this.call_type = "";
@@ -180,6 +217,10 @@ class JFunctionProto {
 	
 	getClass() {
 		return "JFunctionProto";
+	}
+	
+	getName() {
+		return this.type;
 	}
 	
 	toString() {
@@ -225,6 +266,10 @@ class JEnumDecl {
 	
 	getClass() {
 		return "JEnumDecl";
+	}
+	
+	getName() {
+		return getNthWord(this.type, 1);
 	}
 	
 	toString() {
@@ -292,9 +337,13 @@ class IDAJson {
 
 class IdaJsonProcessor {
 	IdaJsonProcessor() {
+		this.skipTypes     = 0;
+		this.skipFunctions = 0;
+		this.skipGlobals   = 0;
+		this.updateEnums = 1;
 		this.section = "";
 		this.kind = "";
-		this.field = "";
+		this.skipEntry = 0;
 		this.deadq = LinkedList();
 		this.totalEnumEntries = 0;
 	}
@@ -329,7 +378,7 @@ class IdaJsonProcessor {
 				}
 				if (success) {
 					auto type = val.type;
-					auto name = getNthWord(type, 1);
+					auto name = val.getName();
 					auto code = entry.val.second;
 					msg("%s\n\n", code);
 					if (!parse_decl2(name, code)) {
@@ -357,9 +406,9 @@ class IdaJsonProcessor {
 			auto entry = this.deadq.head;
 			while (entry != 0) {
 				auto nextEntry = entry.next;
-				auto type = entry.val.first.type;
+				auto val = entry.val.first;
 				auto code = entry.val.second;
-				auto name = getNthWord(type, 1);
+				auto name = val.getName();
 				msg("%s\n\n", code);
 				if (parse_decl2(name, code)) {
 					msg("Type '%s' correctly defined at attempt %d.\n\n", name, i);
@@ -373,40 +422,11 @@ class IdaJsonProcessor {
 		}
 	}
 	
-	enter(depth, type, key, pVal) {
-		if (depth == 0) {
-			this.section = key;
-			msg("### %s ###\n\n", toupper(key));
-		} else if (depth == 2) {
-			this.field = key;
-		}
-		return 1;
-	}
-	
 	postProcessType(val) {
-		auto code;
-		auto name;
-		if (val.kind == "TYPEDEF_DECL") {
-			auto tdef = val.get("typedef");
-			if (substr(tdef, strlen(tdef) - 1, -1) == ")") {
-				//msg("# WARNING: typedef %s looks as function prototype, attempt to recovery...\n\n", val.type);
-				auto p = strstr(tdef, "(*)(");
-				auto rett = substr(tdef, 0, p);
-				auto args = substr(tdef, p + 3, -1);
-				code = sprintf("typedef %s (*%s)%s;", rett, val.type, args);
-			} else {
-				code = sprintf("typedef %s %s;", tdef, val.type);
-			}
-			name = val.type;
-		} else if (val.kind == "FUNCTIONPROTO") {
-			code = val.toString();
-			name = val.type;
-		} else {
-			code = val.toString();
-			name = getNthWord(val.type, 1);
-			if (val.kind == "ENUM_DECL") {
-				this.totalEnumEntries = this.totalEnumEntries + val.constants.size;
-			}
+		auto name = val.getName();
+		auto code = val.toString();
+		if (val.kind == "ENUM_DECL") {
+			this.totalEnumEntries = this.totalEnumEntries + val.constants.size;
 		}
 		msg("%s\n\n", code);
 		if (!parse_decl2(name, code)) {
@@ -492,12 +512,36 @@ class IdaJsonProcessor {
 		}
 	}
 	
+	mustSkipSection(name) {
+		if (name == "types"     && this.skipTypes    ) return 1;
+		if (name == "functions" && this.skipFunctions) return 1;
+		if (name == "globals"   && this.skipGlobals  ) return 1;
+		return 0;
+	}
+	
+	enter(depth, type, key, pVal) {
+		if (depth == 0) {
+			this.section = key;
+			if (this.mustSkipSection(key)) {
+				msg("### Section %s skipped\n\n", toupper(key));
+				return 0;
+			}
+			msg("### %s ###\n\n", toupper(key));
+		} else if (depth == 1) {
+			this.skipEntry = 0;
+		} else if (this.skipEntry) {
+			return 0;
+		}
+		if (key == "typedef") {
+			key = "typedef_";
+		}
+		return 1;
+	}
+	
 	exit(depth, containerType, key, val, pContainer) {
-		auto name;
-		auto addr;
-		auto type;
-		auto code;
-		auto p;
+		if (this.skipEntry) {
+			return 0;
+		}
 		if (depth == 2) {
 			if (key == "kind") {
 				this.kind = val;
@@ -507,10 +551,17 @@ class IdaJsonProcessor {
 					pContainer = JUnionDecl();
 				} else if (val == "FUNCTIONPROTO") {
 					pContainer = JFunctionProto();
-				/*} else if (val == "TYPEDEF_DECL") {	//Can't use because member "typedef" is a reserved keyword
-					pContainer = JTypedefDecl(); */
+				} else if (val == "TYPEDEF_DECL") {
+					pContainer = JTypedefDecl();
 				} else if (val == "ENUM_DECL") {
 					pContainer = JEnumDecl();
+				}
+			} else if (this.kind == "ENUM_DECL" && key == "type" && !this.updateEnums) {
+				pContainer.type = val;
+				auto name = pContainer.getName();
+				if (get_tinfo(name) != 0) {
+					msg("# enum %s already defined, skipping...\n\n", name);
+					this.skipEntry = 1;
 				}
 			}
 		} else if (depth == 1) {
@@ -534,13 +585,28 @@ static main() {
 	try {
 		auto filename = ask_file(0, "*.json", "Open JSON file");
 		if (filename != "") {
-			msg("\nParsing file \"%s\"\n\n", filename);
+			auto question = "Please select the sections you want to process.\n"
+						  + "  t types\n"
+						  + "  f functions\n"
+						  + "  g globals\n";
+			auto opts = ask_str("tfg", 0, question);
+			if (opts == "") return;
+			auto updateEnums = ask_yn(0, "Do you want to update existing enums?");
+			if (updateEnums == -1) return;
+			//
 			auto processor = IdaJsonProcessor();
+			processor.skipTypes     = strstr(opts, "t") < 0;
+			processor.skipFunctions = strstr(opts, "f") < 0;
+			processor.skipGlobals   = strstr(opts, "g") < 0;
+			processor.updateEnums = updateEnums;
+			msg("\nParsing file \"%s\"\n\n", filename);
 			auto file = JsonStream(filename, processor);
 			file.parse(IDAJson());
 			file.close();
 			msg("\nDONE!\n\n");
-			msg("Total enum entries: %d\n\n", processor.totalEnumEntries);
+			if (updateEnums) {
+				msg("Total enum entries: %d\n\n", processor.totalEnumEntries);
+			}
 		}
 	} catch (err) {
 		if (value_is_object(err)) {
