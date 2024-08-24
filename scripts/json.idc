@@ -211,8 +211,8 @@ class JsonStream {
 					}
 				}
 			}
-			auto val = this.readAny(depth + 1, childContainer);
 			if (addKey) {
+				auto val = this.readAny(depth + 1, childContainer);
 				auto addVal = 1;
 				if (this.processor != 0) {
 					addVal = this.processor.exit(depth, "object", key, val, &newContainer);
@@ -236,6 +236,8 @@ class JsonStream {
 						setattr(obj, key, val);
 					}
 				}
+			} else {
+				this.skipValue();
 			}
 			c = this.read();
 			if (c != ',' && c != '}') {
@@ -246,6 +248,44 @@ class JsonStream {
 			}
 		}
 		return obj;
+	}
+	
+	skipValue() {
+		auto c = this.read();
+		if (c == 'n') {
+			this.unread(c);
+			this.readNull();
+		} else if (c == '"') {
+			this.unread(c);
+			this.readString();
+		} else if (c == '-' || isdigit(c)) {
+			this.unread(c);
+			this.readNumber();
+		} else {
+			auto depth = 0;
+			auto instr = 0;
+			auto escape = 0;
+			while (c >= 0) {
+				if (escape) {
+					escape = 0;
+				} else if (instr) {
+					if (c == '\\') {
+						escape = 1;
+					} else if (c == '"') {
+						instr = 0;
+						if (depth == 0) break;
+					}
+				} else if (c == '"') {
+					instr = 1;
+				} else if (c == '[' || c == '{') {
+					depth++;
+				} else if (c == ']' || c == '}') {
+					depth--;
+					if (depth == 0) break;
+				}
+				c = this.read();
+			}
+		}
 	}
 
 	readAny(depth, container = 0) {
