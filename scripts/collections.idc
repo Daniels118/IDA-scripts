@@ -42,6 +42,10 @@ class Collection {
 		}
 	}
 	
+	size() {
+		return this.size;
+	}
+	
 	isList() { return 0; }
 	
 	isRandomAccess() { return 0; }
@@ -98,15 +102,23 @@ class Array : Collection {
 		this.size = size;
 	}
 	
-	add(val) {
-		auto index = this.size;
-		this.resize(index + 1);
+	add(val, index = -1) {
+		if (index == -1) {
+			index = this.size;
+		} else if (index < 0 || index > this.size) {
+			throw sprintf("Index %d out of bounds", index);
+		}
+		this.resize(this.size + 1);
+		auto i;
+		for (i = this.size - 1; i > index; i--) {
+			this[i] = this[i - 1];
+		}
 		this[index] = val;
 	}
 	
 	remove(index) {
 		if (index < 0 || index >= this.size) {
-			throw "Index "+itoa(index, 10)+" out of bounds";
+			throw sprintf("Index %d out of bounds", index);
 		}
 		auto i;
 		this.size--;
@@ -171,31 +183,51 @@ class LinkedList : Collection {
 		}
 	}
 	
-	add(val) {
+	getEntry(index) {
+		auto entry = this.head;
+		for (; index > 0; index--) {
+			entry = entry.next;
+		}
+		return entry;
+	}
+	
+	add(val, index = -1) {
+		if (index == -1) {
+			index = this.size;
+		} else if (index < 0 || index > this.size) {
+			throw sprintf("Index %d out of bounds", index);
+		}
 		if (this.size == 0) {
 			this.head = ListEntry(0, 0, val);
 			this.tail = this.head;
 		} else {
-			auto entry = ListEntry(this.tail, 0, val);
-			this.tail.next = entry;
-			this.tail = entry;
+			auto nextEntry = 0;
+			auto prevEntry = this.tail;
+			if (index < this.size) {
+				nextEntry = this.getEntry(index);
+				prevEntry = nextEntry.prev;
+			}
+			auto entry = ListEntry(prevEntry, nextEntry, val);
+			if (prevEntry != 0) {
+				prevEntry.next = entry;
+			} else {
+				this.head = entry;
+			}
+			if (nextEntry != 0) {
+				nextEntry.prev = entry;
+			} else {
+				this.tail = entry;
+			}
 		}
 		this.size++;
 	}
 	
 	get(index) {
-		auto entry = this.head;
-		for (; index > 0; index--) {
-			entry = entry.next;
-		}
-		return entry.val;
+		return this.getEntry(index).val;
 	}
 	
 	set(index, val) {
-		auto entry = this.head;
-		for (; index > 0; index--) {
-			entry = entry.next;
-		}
+		auto entry = this.getEntry(index);
 		auto oldVal = entry.val;
 		entry.val = val;
 		return oldVal;
@@ -252,7 +284,7 @@ class LinkedList : Collection {
 class NullList : LinkedList {
 	NullList(allocator = 0) : LinkedList(allocator) {}
 	
-	add(val) {}
+	add(val, index = -1) {}
 	
 	push(val) {}
 	
@@ -274,11 +306,10 @@ class Pair {
 
 
 /**This is a simple Map implementation based on LinkedList. It has poor performances, but preserves the insertion order.
- * The keys can be accessed both with get/set methods or as class members.
+ * The keys can be accessed both with get/put methods or as class members.
  */
 class LinkedMap : Collection {
 	LinkedMap(allocator = 0) : Collection(allocator) {
-		this._class = "LinkedMap";
 		this._entries = LinkedList();
 		this._size = 0;
 	}
@@ -292,6 +323,10 @@ class LinkedMap : Collection {
 	}
 	
 	isMap() { return 1; }
+	
+	size() {
+		return this._size;
+	}
 	
 	clear() {
 		this._entries.clear();
@@ -370,7 +405,7 @@ class LinkedMap : Collection {
 	
 	remove(key) {
 		auto entry = this.getEntry(key);
-		auto oldVal = entry.second;
+		auto oldVal = entry.val.second;
 		this._entries.removeEntry(entry);
 		this._size--;
 		return oldVal;
@@ -404,15 +439,13 @@ class HashMapIterator {
 	}
 }
 
-/**Efficient Map implementation. The keys can be accessed both with get/set methods or as class members.
+/**Efficient Map implementation. The keys can be accessed both with get/put methods or as class members.
  * The number of buckets can be decided at creation time, but then it stays fixed.
  */
 class HashMap : Collection {
 	HashMap(nBuckets = 10, allocator = 0) : Collection(allocator) {
-		this._class = "HashMap";
 		if (nBuckets < 1) throw "Invalid buckets count";
-		this._buckets = Array(nBuckets);
-		this._buckets.resize(nBuckets);
+		this._buckets = Array(nBuckets, nBuckets);
 		auto i;
 		for (i = 0; i < nBuckets; i++) {
 			this._buckets[i] = LinkedList();
@@ -431,6 +464,10 @@ class HashMap : Collection {
 	}
 	
 	isMap() { return 1; }
+	
+	size() {
+		return this._size;
+	}
 	
 	clear() {
 		auto i;
@@ -508,7 +545,7 @@ class HashMap : Collection {
 	
 	remove(key) {
 		auto entry = this.getEntry(key);
-		auto oldVal = entry.second;
+		auto oldVal = entry.val.second;
 		auto bucket = this.getBucket(key);
 		bucket.removeEntry(entry);
 		this._size--;
