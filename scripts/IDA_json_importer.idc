@@ -505,26 +505,30 @@ class IdaJsonProcessor {
 	postProcessFunction(val) {
 		auto uname = this.fixMangledName(val.undecorated_name);
 		auto addr = val.win_addr;
-		auto dec = val.toString();
-		msg("%s  //.text:%08x;\n", dec, addr);
-		if (set_name(addr, uname, 0)) {
-			//Set stack offset names (optional)
-			auto entry = val.argument_names.head;
-			if (val.call_type == "__thiscall") {
-				entry = entry.next;
-			}
-			auto offset = 4;
-			for (; entry != 0; entry = entry.next, offset = offset + 4) {
-				if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), entry.val)) {
-					msg("Failed to set name '%s' for stack offset %d at address %08x\n", entry.val, offset, addr);
-				}
-			}
-			//Set function parameter names and types
-			if (!apply_type(addr, dec)) {
-				msg("Failed to set parameters for function %s at address %08x\n", val.decorated_name, addr);
-			}
+		if (addr < 0) {
+			msg("Function %s not imported because it's inlined\n", val.decorated_name);
 		} else {
-			msg("Failed to set function name %s at address %08x\n", val.decorated_name, addr);
+			auto dec = val.toString();
+			msg("%s  //.text:%08x;\n", dec, addr);
+			if (set_name(addr, uname, 0)) {
+				//Set stack offset names (optional)
+				auto entry = val.argument_names.head;
+				if (val.call_type == "__thiscall") {
+					entry = entry.next;
+				}
+				auto offset = 4;
+				for (; entry != 0; entry = entry.next, offset = offset + 4) {
+					if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), entry.val)) {
+						msg("Failed to set name '%s' for stack offset %d at address %08x\n", entry.val, offset, addr);
+					}
+				}
+				//Set function parameter names and types
+				if (!apply_type(addr, dec)) {
+					msg("Failed to set parameters for function %s at address %08x\n", val.decorated_name, addr);
+				}
+			} else {
+				msg("Failed to set function name %s at address %08x\n", val.decorated_name, addr);
+			}
 		}
 	}
 	
