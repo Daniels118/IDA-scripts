@@ -528,17 +528,25 @@ class IdaJsonProcessor {
 			msg("%s  //.text:%08x;\n", dec, addr);
 			if (set_name(addr, uname, 0)) {
 				//Set stack offset names (optional)
-				auto entry = val.argument_names.head;
+				auto nameEntry = val.argument_names.head;
+				auto typeEntry = val.argument_types.head;
 				if (val.call_type == "__thiscall") {
-					entry = entry.next;
+					nameEntry = nameEntry.next;
+					typeEntry = typeEntry.next;
 				}
 				auto offset = 4;
-				for (; entry != 0; entry = entry.next, offset = offset + 4) {
-					if (entry.val != "") {
-						if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), entry.val)) {
-							msg("Failed to set name '%s' for stack offset %d at address %08x\n", entry.val, offset, addr);
+				for (; nameEntry != 0; nameEntry = nameEntry.next, typeEntry = typeEntry.next) {
+					if (nameEntry.val != "") {
+						if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), nameEntry.val)) {
+							msg("Failed to set name '%s' for stack offset %d at address %08x\n", nameEntry.val, offset, addr);
 						}
 					}
+					auto sz = sizeof(typeEntry.val);
+					if (sz == -1) {
+						msg("Failed to set get size for type %s, stack names will be skipped.\n", typeEntry.val);
+						break;
+					}
+					offset = offset + sz;
 				}
 				//Set function parameter names and types
 				if (!apply_type(addr, dec)) {
