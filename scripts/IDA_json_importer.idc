@@ -80,14 +80,6 @@ class JStructMember {
 			}
 			//Remove parentheses around pointer operators
 			type = str_replace_first(type, "(*)", "*");
-			//Remove type specifiers
-			if (starts_with(type, "enum ")) {
-				type = substr(type, 5, -1);
-			} else if (starts_with(type, "struct ")) {
-				type = substr(type, 7, -1);
-			} else if (starts_with(type, "union ")) {
-				type = substr(type, 6, -1);
-			}
 			return type + " " + name + ";";
 		}
 	}
