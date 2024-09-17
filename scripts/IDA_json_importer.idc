@@ -213,6 +213,8 @@ class JFunctionProto {
 		this.result = "";
 		this.call_type = "";
 		this.signature = "";
+		this.args = LinkedList();
+		this.arg_names = 0;
 	}
 	
 	getClass() {
@@ -223,17 +225,39 @@ class JFunctionProto {
 		return this.type;
 	}
 	
+	getArgs() {
+		auto args = "";
+		auto argTypeEntry = this.args.head;
+		auto argNameEntry = 0;
+		if (this.arg_names != 0) {
+			argNameEntry = this.arg_names.head;
+		}
+		if (argTypeEntry != 0) {
+			args = argTypeEntry.val;
+			if (this.arg_names != 0) {
+				args = args + " " + argNameEntry.val;
+				argNameEntry = argNameEntry.next;
+			}
+			argTypeEntry = argTypeEntry.next;
+			while (argTypeEntry != 0) {
+				args = args + ", " + argTypeEntry.val;
+				if (this.arg_names != 0) {
+					args = args + " " + argNameEntry.val;
+					argNameEntry = argNameEntry.next;
+				}
+				argTypeEntry = argTypeEntry.next;
+			}
+		}
+		return args;
+	}
+	
 	toString() {
 		auto rett = this.result;
 		if (starts_with(rett, "enum ")) {
 			rett = substr(rett, 5, -1);
 		}
-		auto args = substr(this.signature, strlen(this.result), -1);
-		auto p = strstr(args, " __attribute__");
-		if (p >= 0) {
-			args = substr(args, 0, p);
-		}
-		return sprintf("typedef %s (%s *%s)%s;", rett, this.call_type, this.type, args);
+		auto args = this.getArgs();
+		return sprintf("typedef %s (%s *%s)(%s);", rett, this.call_type, this.type, args);
 	}
 }
 
