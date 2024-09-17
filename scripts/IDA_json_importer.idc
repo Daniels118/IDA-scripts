@@ -80,14 +80,6 @@ class JStructMember {
 			}
 			//Remove parentheses around pointer operators
 			type = str_replace_first(type, "(*)", "*");
-			//Remove type specifiers
-			if (starts_with(type, "enum ")) {
-				type = substr(type, 5, -1);
-			} else if (starts_with(type, "struct ")) {
-				type = substr(type, 7, -1);
-			} else if (starts_with(type, "union ")) {
-				type = substr(type, 6, -1);
-			}
 			return type + " " + name + ";";
 		}
 	}
@@ -213,6 +205,8 @@ class JFunctionProto {
 		this.result = "";
 		this.call_type = "";
 		this.signature = "";
+		this.args = LinkedList();
+		this.arg_names = 0;
 	}
 	
 	getClass() {
@@ -223,17 +217,39 @@ class JFunctionProto {
 		return this.type;
 	}
 	
+	getArgs() {
+		auto args = "";
+		auto argTypeEntry = this.args.head;
+		auto argNameEntry = 0;
+		if (this.arg_names != 0) {
+			argNameEntry = this.arg_names.head;
+		}
+		if (argTypeEntry != 0) {
+			args = argTypeEntry.val;
+			if (this.arg_names != 0) {
+				args = args + " " + argNameEntry.val;
+				argNameEntry = argNameEntry.next;
+			}
+			argTypeEntry = argTypeEntry.next;
+			while (argTypeEntry != 0) {
+				args = args + ", " + argTypeEntry.val;
+				if (this.arg_names != 0) {
+					args = args + " " + argNameEntry.val;
+					argNameEntry = argNameEntry.next;
+				}
+				argTypeEntry = argTypeEntry.next;
+			}
+		}
+		return args;
+	}
+	
 	toString() {
 		auto rett = this.result;
 		if (starts_with(rett, "enum ")) {
 			rett = substr(rett, 5, -1);
 		}
-		auto args = substr(this.signature, strlen(this.result), -1);
-		auto p = strstr(args, " __attribute__");
-		if (p >= 0) {
-			args = substr(args, 0, p);
-		}
-		return sprintf("typedef %s (%s *%s)%s;", rett, this.call_type, this.type, args);
+		auto args = this.getArgs();
+		return sprintf("typedef %s (%s *%s)(%s);", rett, this.call_type, this.type, args);
 	}
 }
 
@@ -512,15 +528,25 @@ class IdaJsonProcessor {
 			msg("%s  //.text:%08x;\n", dec, addr);
 			if (set_name(addr, uname, 0)) {
 				//Set stack offset names (optional)
-				auto entry = val.argument_names.head;
+				auto nameEntry = val.argument_names.head;
+				auto typeEntry = val.argument_types.head;
 				if (val.call_type == "__thiscall") {
-					entry = entry.next;
+					nameEntry = nameEntry.next;
+					typeEntry = typeEntry.next;
 				}
 				auto offset = 4;
-				for (; entry != 0; entry = entry.next, offset = offset + 4) {
-					if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), entry.val)) {
-						msg("Failed to set name '%s' for stack offset %d at address %08x\n", entry.val, offset, addr);
+				for (; nameEntry != 0; nameEntry = nameEntry.next, typeEntry = typeEntry.next) {
+					if (nameEntry.val != "") {
+						if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), nameEntry.val)) {
+							msg("Failed to set name '%s' for stack offset %d at address %08x\n", nameEntry.val, offset, addr);
+						}
 					}
+					auto sz = sizeof(typeEntry.val);
+					if (sz == -1) {
+						msg("Failed to set get size for type %s, stack names will be skipped.\n", typeEntry.val);
+						break;
+					}
+					offset = offset + sz;
 				}
 				//Set function parameter names and types
 				if (!apply_type(addr, dec)) {
