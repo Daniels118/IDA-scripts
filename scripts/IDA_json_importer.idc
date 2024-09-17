@@ -534,8 +534,10 @@ class IdaJsonProcessor {
 				}
 				auto offset = 4;
 				for (; entry != 0; entry = entry.next, offset = offset + 4) {
-					if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), entry.val)) {
-						msg("Failed to set name '%s' for stack offset %d at address %08x\n", entry.val, offset, addr);
+					if (entry.val != "") {
+						if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), entry.val)) {
+							msg("Failed to set name '%s' for stack offset %d at address %08x\n", entry.val, offset, addr);
+						}
 					}
 				}
 				//Set function parameter names and types
