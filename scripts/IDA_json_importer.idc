@@ -52,6 +52,24 @@ static parse_decl2(name, code) {
 	return 1;
 }
 
+static makeDefFromTypeAndName(type, name) {
+	//Check if type is a function
+	auto p = strstr(type, "*)(");
+	if (p >= 0) {
+		return substr(type, 0, p + 1) + name + substr(type, p + 1, -1);
+	} else {
+		//Move array size after field name
+		p = strstr(type, "[");
+		if (p >= 0) {
+			name = name + substr(type, p, -1);
+			type = substr(type, 0, p);
+		}
+		//Remove parentheses around pointer operators
+		type = str_replace_first(type, "(*)", "*");
+		return type + " " + name;
+	}
+}
+
 
 class JStructMember {
 	JStructMember() {
@@ -65,23 +83,7 @@ class JStructMember {
 	}
 	
 	toString() {
-		auto type = this.type;
-		auto name = this.name;
-		//Check if member type is a function
-		auto p = strstr(type, "*)(");
-		if (p >= 0) {
-			return substr(type, 0, p + 1) + name + substr(type, p + 1, -1) + ";";
-		} else {
-			//Move array size after field name
-			p = strstr(type, "[");
-			if (p >= 0) {
-				name = name + substr(type, p, -1);
-				type = substr(type, 0, p);
-			}
-			//Remove parentheses around pointer operators
-			type = str_replace_first(type, "(*)", "*");
-			return type + " " + name + ";";
-		}
+		return makeDefFromTypeAndName(this.type, this.name) + ";";
 	}
 }
 
@@ -217,6 +219,17 @@ class JFunctionProto {
 		return this.type;
 	}
 	
+	nextArg(argTypeEntry, argNameEntry) {
+		auto type = argTypeEntry.val;
+		argTypeEntry = argTypeEntry.next;
+		if (argNameEntry == 0) {
+			return type;
+		}
+		auto name = argNameEntry.val;
+		argNameEntry = argNameEntry.next;
+		return makeDefFromTypeAndName(type, name);
+	}
+	
 	getArgs() {
 		auto args = "";
 		auto argTypeEntry = this.args.head;
@@ -225,19 +238,9 @@ class JFunctionProto {
 			argNameEntry = this.arg_names.head;
 		}
 		if (argTypeEntry != 0) {
-			args = argTypeEntry.val;
-			if (this.arg_names != 0) {
-				args = args + " " + argNameEntry.val;
-				argNameEntry = argNameEntry.next;
-			}
-			argTypeEntry = argTypeEntry.next;
+			args = this.nextArg(&argTypeEntry, &argNameEntry);
 			while (argTypeEntry != 0) {
-				args = args + ", " + argTypeEntry.val;
-				if (this.arg_names != 0) {
-					args = args + " " + argNameEntry.val;
-					argNameEntry = argNameEntry.next;
-				}
-				argTypeEntry = argTypeEntry.next;
+				args = args + ", " + this.nextArg(&argTypeEntry, &argNameEntry);
 			}
 		}
 		return args;
