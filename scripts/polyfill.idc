@@ -30,6 +30,18 @@ static assert(cond, txt) {
 	}
 }
 
+static function_exists(name) {
+	return value_is_func(eval(name));
+}
+
+static get_function(name, dflt = 0) {
+	auto val = eval(name);
+	if (value_is_func(val)) {
+		return val;
+	}
+	return dflt;
+}
+
 static starts_with(str, prefix) {
 	auto l1 = strlen(str);
 	auto l2 = strlen(prefix);
