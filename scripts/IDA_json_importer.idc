@@ -245,9 +245,6 @@ class JFunctionProto {
 	
 	toString() {
 		auto rett = this.result;
-		if (starts_with(rett, "enum ")) {
-			rett = substr(rett, 5, -1);
-		}
 		auto args = this.getArgs();
 		return sprintf("typedef %s (%s *%s)(%s);", rett, this.call_type, this.type, args);
 	}
