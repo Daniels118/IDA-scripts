@@ -22,6 +22,12 @@
 
 #include "json.idc"
 
+extern get_named_type_tid2;
+
+static fake_get_named_type_tid(name) {
+	return 0;
+}
+
 static name_is_struct(name) {
 	return get_struc_id(name) != -1;
 }
@@ -29,17 +35,22 @@ static name_is_struct(name) {
 static parse_decl2(name, code) {
 	if (parse_decls(code, PT_REPLACE) != 0) {
 		auto tinfo = get_tinfo(name);
-		auto isGlobal = tinfo != 0 && get_named_type_tid(name) == BADADDR;
+		auto isGlobal = tinfo != 0 && get_named_type_tid2(name) == BADADDR;
 		if (isGlobal) {
 			throw sprintf("Type %s is a global type and can't be redefined. Please rename it.", name);
 		}
 		if (tinfo != 0) {
-			auto oldKind = getNthWord(tinfo.print(PRTYPE_TYPE), 0);
+			auto tinfoStr = tinfo.print(PRTYPE_TYPE);
+			auto oldKind = getNthWord(tinfoStr, 0);
 			if (oldKind == name) {
 				if (name_is_struct(name)) {
 					oldKind = "struct";
 				} else {
 					oldKind = "?";
+				}
+			} else if (oldKind == "typedef") {	//Empty structs are shown as typedef
+				if (countWords(tinfoStr) == 2) {
+					oldKind = "struct";
 				}
 			}
 			auto newKind = getNthWord(code, 0);
@@ -307,6 +318,7 @@ class JFunction {
 		this.undecorated_name = "";
 		this.call_type = "";
 		this.win_addr = 0;
+		this.mac_addr = -1;
 		this.argument_types = LinkedList();
 		this.argument_names = LinkedList();
 	}
@@ -651,6 +663,7 @@ class IdaJsonProcessor {
 
 static main() {
 	auto err;
+	get_named_type_tid2 = get_function("get_named_type_tid", fake_get_named_type_tid);
 	try {
 		auto filename = ask_file(0, "*.json", "Open JSON file");
 		if (filename != "") {
