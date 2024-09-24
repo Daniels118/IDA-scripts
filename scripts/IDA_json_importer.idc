@@ -530,6 +530,61 @@ class IdaJsonProcessor {
 		return name;
 	}
 	
+	safeNext(entry) {
+		if (entry == 0) return;
+		entry = entry.next;
+	}
+	
+	skipRegisterParameters(callType, typeEntry, nameEntry) {
+		if (callType == "__thiscall") {
+			this.safeNext(&typeEntry);
+			this.safeNext(&nameEntry);
+		} else if (callType == "__fastcall") {
+			this.safeNext(&typeEntry);
+			this.safeNext(&nameEntry);
+			this.safeNext(&typeEntry);
+			this.safeNext(&nameEntry);
+		}
+	}
+	
+	clearStackNames(addr, typeEntry) {
+		auto offset = 4;
+		for (; typeEntry != 0; typeEntry = typeEntry.next) {
+			if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), sprintf("arg_%d", offset))) {
+				msg("Failed to reset name for stack offset %d at address %08x\n", offset, addr);
+			}
+			auto sz = sizeof(typeEntry.val);
+			if (sz == -1) {
+				msg("Failed to set get size for type %s, stack names will be skipped.\n", typeEntry.val);
+				break;
+			}
+			if (sz % 4 != 0) {
+				sz = sz + 4 - sz % 4;
+			}
+			offset = offset + sz;
+		}
+	}
+	
+	setStackNames(addr, typeEntry, nameEntry) {
+		auto offset = 4;
+		for (; typeEntry != 0; typeEntry = typeEntry.next, nameEntry = nameEntry.next) {
+			if (nameEntry.val != "") {
+				if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), nameEntry.val)) {
+					msg("Failed to set name '%s' for stack offset %d at address %08x\n", nameEntry.val, offset, addr);
+				}
+			}
+			auto sz = sizeof(typeEntry.val);
+			if (sz == -1) {
+				msg("Failed to set get size for type %s, stack names will be skipped.\n", typeEntry.val);
+				break;
+			}
+			if (sz % 4 != 0) {
+				sz = sz + 4 - sz % 4;
+			}
+			offset = offset + sz;
+		}
+	}
+	
 	postProcessFunction(val) {
 		auto uname = this.fixMangledName(val.undecorated_name);
 		auto addr = val.win_addr;
@@ -540,29 +595,11 @@ class IdaJsonProcessor {
 			msg("%s  //.text:%08x;\n", dec, addr);
 			if (set_name(addr, uname, 0)) {
 				//Set stack offset names (optional)
-				auto nameEntry = val.argument_names.head;
 				auto typeEntry = val.argument_types.head;
-				if (val.call_type == "__thiscall") {
-					nameEntry = nameEntry.next;
-					typeEntry = typeEntry.next;
-				}
-				auto offset = 4;
-				for (; nameEntry != 0; nameEntry = nameEntry.next, typeEntry = typeEntry.next) {
-					if (nameEntry.val != "") {
-						if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), nameEntry.val)) {
-							msg("Failed to set name '%s' for stack offset %d at address %08x\n", nameEntry.val, offset, addr);
-						}
-					}
-					auto sz = sizeof(typeEntry.val);
-					if (sz == -1) {
-						msg("Failed to set get size for type %s, stack names will be skipped.\n", typeEntry.val);
-						break;
-					}
-					if (sz % 4 != 0) {
-						sz = sz + 4 - sz % 4;
-					}
-					offset = offset + sz;
-				}
+				auto nameEntry = val.argument_names.head;
+				this.skipRegisterParameters(val.call_type, &typeEntry, &nameEntry);
+				this.clearStackNames(addr, typeEntry);
+				this.setStackNames(addr, typeEntry, nameEntry);
 				//Set function parameter names and types
 				if (!apply_type(addr, dec)) {
 					msg("Failed to set parameters for function %s at address %08x\n", val.decorated_name, addr);
