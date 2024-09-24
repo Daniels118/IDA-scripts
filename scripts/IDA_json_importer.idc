@@ -558,6 +558,9 @@ class IdaJsonProcessor {
 						msg("Failed to set get size for type %s, stack names will be skipped.\n", typeEntry.val);
 						break;
 					}
+					if (sz % 4 != 0) {
+						sz = sz + 4 - sz % 4;
+					}
 					offset = offset + sz;
 				}
 				//Set function parameter names and types
