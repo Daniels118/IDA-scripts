@@ -567,6 +567,9 @@ class IdaJsonProcessor {
 				if (!apply_type(addr, dec)) {
 					msg("Failed to set parameters for function %s at address %08x\n", val.decorated_name, addr);
 				}
+				//Set metadata
+				auto comments = sprintf("mac_addr=%d, undecorated_name=%s", val.mac_addr, val.undecorated_name);
+				set_func_cmt(addr, comments, 0);
 			} else {
 				msg("Failed to set function name %s at address %08x\n", val.decorated_name, addr);
 			}
