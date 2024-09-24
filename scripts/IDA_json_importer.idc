@@ -440,7 +440,14 @@ class IdaJsonProcessor {
 					auto name = val.getName();
 					auto code = entry.val.second;
 					msg("%s\n\n", code);
-					if (!parse_decl2(name, code)) {
+					if (parse_decl2(name, code)) {
+						auto id = get_struc_id(name);
+						auto comment = sprintf("size=%d", val.size);
+						set_struc_cmt(id, comment, 0);
+						if (sizeof(name) != val.size) {
+							throw sprintf("Size of type %s should be %d, found %d.", name, val.size, sizeof(name));
+						}
+					} else {
 						throw sprintf("Failed to define type '%s'", name);
 					}
 					msg("# Type %s successfully defined.\n\n", name);
@@ -488,7 +495,16 @@ class IdaJsonProcessor {
 			this.totalEnumEntries = this.totalEnumEntries + val.constants.size;
 		}
 		msg("%s\n\n", code);
-		if (!parse_decl2(name, code)) {
+		if (parse_decl2(name, code)) {
+			if (val.kind == "STRUCT_DECL") {
+				auto id = get_struc_id(name);
+				auto comment = sprintf("size=%d", val.size);
+				set_struc_cmt(id, comment, 0);
+				if (sizeof(name) != val.size) {
+					throw sprintf("Size of type %s should be %d, found %d.", name, val.size, sizeof(name));
+				}
+			}
+		} else {
 			this.deadq.queue(Pair(val, code));
 			auto emptyType = substr(code, 0, strstr(code, "{")) + "{};";
 			if (parse_decl2(name, emptyType)) {
