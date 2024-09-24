@@ -68,17 +68,19 @@ static makeDefFromTypeAndName(type, name) {
 	auto p = strstr(type, "*)(");
 	if (p >= 0) {
 		return substr(type, 0, p + 1) + name + substr(type, p + 1, -1);
-	} else {
-		//Move array size after field name
-		p = strstr(type, "[");
-		if (p >= 0) {
-			name = name + substr(type, p, -1);
-			type = substr(type, 0, p);
-		}
-		//Remove parentheses around pointer operators
-		type = str_replace_first(type, "(*)", "*");
-		return type + " " + name;
 	}
+	//Check if type is pointer to array
+	p = strstr(type, "*)[");
+	if (p >= 0) {
+		return substr(type, 0, p + 1) + name + substr(type, p + 1, -1);
+	}
+	//Check if type is array
+	p = strstr(type, "[");
+	if (p >= 0) {
+		return substr(type, 0, p) + " " + name + substr(type, p, -1);
+	}
+	//
+	return str_replace_first(type, "(*)", "*") + " " + name;
 }
 
 
