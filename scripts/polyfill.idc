@@ -168,3 +168,16 @@ static getNthWord(s, n) {
 	}
 	return substr(s, 0, p1);
 }
+
+static countWords(s) {
+	auto n = 0;
+	auto p1 = strstr(s, " ");
+	if (p1 < 0) p1 = strlen(s);
+	while (p1 > 0) {
+		n++;
+		s = substr(s, p1 + 1, -1);
+		p1 = strstr(s, " ");
+		if (p1 < 0) p1 = strlen(s);
+	}
+	return n;
+}
