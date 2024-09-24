@@ -22,6 +22,12 @@
 
 #include "json.idc"
 
+extern get_named_type_tid2;
+
+static fake_get_named_type_tid(name) {
+	return 0;
+}
+
 static name_is_struct(name) {
 	return get_struc_id(name) != -1;
 }
@@ -29,17 +35,22 @@ static name_is_struct(name) {
 static parse_decl2(name, code) {
 	if (parse_decls(code, PT_REPLACE) != 0) {
 		auto tinfo = get_tinfo(name);
-		auto isGlobal = tinfo != 0 && get_named_type_tid(name) == BADADDR;
+		auto isGlobal = tinfo != 0 && get_named_type_tid2(name) == BADADDR;
 		if (isGlobal) {
 			throw sprintf("Type %s is a global type and can't be redefined. Please rename it.", name);
 		}
 		if (tinfo != 0) {
-			auto oldKind = getNthWord(tinfo.print(PRTYPE_TYPE), 0);
+			auto tinfoStr = tinfo.print(PRTYPE_TYPE);
+			auto oldKind = getNthWord(tinfoStr, 0);
 			if (oldKind == name) {
 				if (name_is_struct(name)) {
 					oldKind = "struct";
 				} else {
 					oldKind = "?";
+				}
+			} else if (oldKind == "typedef") {	//Empty structs are shown as typedef
+				if (countWords(tinfoStr) == 2) {
+					oldKind = "struct";
 				}
 			}
 			auto newKind = getNthWord(code, 0);
@@ -50,6 +61,26 @@ static parse_decl2(name, code) {
 		return 0;
 	}
 	return 1;
+}
+
+static makeDefFromTypeAndName(type, name) {
+	//Check if type is a function
+	auto p = strstr(type, "*)(");
+	if (p >= 0) {
+		return substr(type, 0, p + 1) + name + substr(type, p + 1, -1);
+	}
+	//Check if type is pointer to array
+	p = strstr(type, "*)[");
+	if (p >= 0) {
+		return substr(type, 0, p + 1) + name + substr(type, p + 1, -1);
+	}
+	//Check if type is array
+	p = strstr(type, "[");
+	if (p >= 0) {
+		return substr(type, 0, p) + " " + name + substr(type, p, -1);
+	}
+	//
+	return str_replace_first(type, "(*)", "*") + " " + name;
 }
 
 
@@ -65,23 +96,7 @@ class JStructMember {
 	}
 	
 	toString() {
-		auto type = this.type;
-		auto name = this.name;
-		//Check if member type is a function
-		auto p = strstr(type, "*)(");
-		if (p >= 0) {
-			return substr(type, 0, p + 1) + name + substr(type, p + 1, -1) + ";";
-		} else {
-			//Move array size after field name
-			p = strstr(type, "[");
-			if (p >= 0) {
-				name = name + substr(type, p, -1);
-				type = substr(type, 0, p);
-			}
-			//Remove parentheses around pointer operators
-			type = str_replace_first(type, "(*)", "*");
-			return type + " " + name + ";";
-		}
+		return makeDefFromTypeAndName(this.type, this.name) + ";";
 	}
 }
 
@@ -217,6 +232,17 @@ class JFunctionProto {
 		return this.type;
 	}
 	
+	nextArg(argTypeEntry, argNameEntry) {
+		auto type = argTypeEntry.val;
+		argTypeEntry = argTypeEntry.next;
+		if (argNameEntry == 0) {
+			return type;
+		}
+		auto name = argNameEntry.val;
+		argNameEntry = argNameEntry.next;
+		return makeDefFromTypeAndName(type, name);
+	}
+	
 	getArgs() {
 		auto args = "";
 		auto argTypeEntry = this.args.head;
@@ -225,19 +251,9 @@ class JFunctionProto {
 			argNameEntry = this.arg_names.head;
 		}
 		if (argTypeEntry != 0) {
-			args = argTypeEntry.val;
-			if (this.arg_names != 0) {
-				args = args + " " + argNameEntry.val;
-				argNameEntry = argNameEntry.next;
-			}
-			argTypeEntry = argTypeEntry.next;
+			args = this.nextArg(&argTypeEntry, &argNameEntry);
 			while (argTypeEntry != 0) {
-				args = args + ", " + argTypeEntry.val;
-				if (this.arg_names != 0) {
-					args = args + " " + argNameEntry.val;
-					argNameEntry = argNameEntry.next;
-				}
-				argTypeEntry = argTypeEntry.next;
+				args = args + ", " + this.nextArg(&argTypeEntry, &argNameEntry);
 			}
 		}
 		return args;
@@ -245,9 +261,6 @@ class JFunctionProto {
 	
 	toString() {
 		auto rett = this.result;
-		if (starts_with(rett, "enum ")) {
-			rett = substr(rett, 5, -1);
-		}
 		auto args = this.getArgs();
 		return sprintf("typedef %s (%s *%s)(%s);", rett, this.call_type, this.type, args);
 	}
@@ -307,6 +320,7 @@ class JFunction {
 		this.undecorated_name = "";
 		this.call_type = "";
 		this.win_addr = 0;
+		this.mac_addr = -1;
 		this.argument_types = LinkedList();
 		this.argument_names = LinkedList();
 	}
@@ -428,7 +442,14 @@ class IdaJsonProcessor {
 					auto name = val.getName();
 					auto code = entry.val.second;
 					msg("%s\n\n", code);
-					if (!parse_decl2(name, code)) {
+					if (parse_decl2(name, code)) {
+						auto id = get_struc_id(name);
+						auto comment = sprintf("size=%d", val.size);
+						set_struc_cmt(id, comment, 0);
+						if (sizeof(name) != val.size) {
+							throw sprintf("Size of type %s should be %d, found %d.", name, val.size, sizeof(name));
+						}
+					} else {
 						throw sprintf("Failed to define type '%s'", name);
 					}
 					msg("# Type %s successfully defined.\n\n", name);
@@ -476,7 +497,16 @@ class IdaJsonProcessor {
 			this.totalEnumEntries = this.totalEnumEntries + val.constants.size;
 		}
 		msg("%s\n\n", code);
-		if (!parse_decl2(name, code)) {
+		if (parse_decl2(name, code)) {
+			if (val.kind == "STRUCT_DECL") {
+				auto id = get_struc_id(name);
+				auto comment = sprintf("size=%d", val.size);
+				set_struc_cmt(id, comment, 0);
+				if (sizeof(name) != val.size) {
+					throw sprintf("Size of type %s should be %d, found %d.", name, val.size, sizeof(name));
+				}
+			}
+		} else {
 			this.deadq.queue(Pair(val, code));
 			auto emptyType = substr(code, 0, strstr(code, "{")) + "{};";
 			if (parse_decl2(name, emptyType)) {
@@ -518,6 +548,61 @@ class IdaJsonProcessor {
 		return name;
 	}
 	
+	safeNext(entry) {
+		if (entry == 0) return;
+		entry = entry.next;
+	}
+	
+	skipRegisterParameters(callType, typeEntry, nameEntry) {
+		if (callType == "__thiscall") {
+			this.safeNext(&typeEntry);
+			this.safeNext(&nameEntry);
+		} else if (callType == "__fastcall") {
+			this.safeNext(&typeEntry);
+			this.safeNext(&nameEntry);
+			this.safeNext(&typeEntry);
+			this.safeNext(&nameEntry);
+		}
+	}
+	
+	clearStackNames(addr, typeEntry) {
+		auto offset = 4;
+		for (; typeEntry != 0; typeEntry = typeEntry.next) {
+			if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), sprintf("arg_%d", offset))) {
+				msg("Failed to reset name for stack offset %d at address %08x\n", offset, addr);
+			}
+			auto sz = sizeof(typeEntry.val);
+			if (sz == -1) {
+				msg("Failed to set get size for type %s, stack names will be skipped.\n", typeEntry.val);
+				break;
+			}
+			if (sz % 4 != 0) {
+				sz = sz + 4 - sz % 4;
+			}
+			offset = offset + sz;
+		}
+	}
+	
+	setStackNames(addr, typeEntry, nameEntry) {
+		auto offset = 4;
+		for (; typeEntry != 0; typeEntry = typeEntry.next, nameEntry = nameEntry.next) {
+			if (nameEntry.val != "") {
+				if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), nameEntry.val)) {
+					msg("Failed to set name '%s' for stack offset %d at address %08x\n", nameEntry.val, offset, addr);
+				}
+			}
+			auto sz = sizeof(typeEntry.val);
+			if (sz == -1) {
+				msg("Failed to set get size for type %s, stack names will be skipped.\n", typeEntry.val);
+				break;
+			}
+			if (sz % 4 != 0) {
+				sz = sz + 4 - sz % 4;
+			}
+			offset = offset + sz;
+		}
+	}
+	
 	postProcessFunction(val) {
 		auto uname = this.fixMangledName(val.undecorated_name);
 		auto addr = val.win_addr;
@@ -528,30 +613,18 @@ class IdaJsonProcessor {
 			msg("%s  //.text:%08x;\n", dec, addr);
 			if (set_name(addr, uname, 0)) {
 				//Set stack offset names (optional)
-				auto nameEntry = val.argument_names.head;
 				auto typeEntry = val.argument_types.head;
-				if (val.call_type == "__thiscall") {
-					nameEntry = nameEntry.next;
-					typeEntry = typeEntry.next;
-				}
-				auto offset = 4;
-				for (; nameEntry != 0; nameEntry = nameEntry.next, typeEntry = typeEntry.next) {
-					if (nameEntry.val != "") {
-						if (!define_local_var(addr, 0, sprintf("[ebp+%d]", offset), nameEntry.val)) {
-							msg("Failed to set name '%s' for stack offset %d at address %08x\n", nameEntry.val, offset, addr);
-						}
-					}
-					auto sz = sizeof(typeEntry.val);
-					if (sz == -1) {
-						msg("Failed to set get size for type %s, stack names will be skipped.\n", typeEntry.val);
-						break;
-					}
-					offset = offset + sz;
-				}
+				auto nameEntry = val.argument_names.head;
+				this.skipRegisterParameters(val.call_type, &typeEntry, &nameEntry);
+				this.clearStackNames(addr, typeEntry);
+				this.setStackNames(addr, typeEntry, nameEntry);
 				//Set function parameter names and types
 				if (!apply_type(addr, dec)) {
 					msg("Failed to set parameters for function %s at address %08x\n", val.decorated_name, addr);
 				}
+				//Set metadata
+				auto comments = sprintf("mac_addr=%d, undecorated_name=%s", val.mac_addr, val.undecorated_name);
+				set_func_cmt(addr, comments, 0);
 			} else {
 				msg("Failed to set function name %s at address %08x\n", val.decorated_name, addr);
 			}
@@ -651,6 +724,7 @@ class IdaJsonProcessor {
 
 static main() {
 	auto err;
+	get_named_type_tid2 = get_function("get_named_type_tid", fake_get_named_type_tid);
 	try {
 		auto filename = ask_file(0, "*.json", "Open JSON file");
 		if (filename != "") {

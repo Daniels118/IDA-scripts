@@ -30,6 +30,18 @@ static assert(cond, txt) {
 	}
 }
 
+static function_exists(name) {
+	return value_is_func(eval(name));
+}
+
+static get_function(name, dflt = 0) {
+	auto val = eval(name);
+	if (value_is_func(val)) {
+		return val;
+	}
+	return dflt;
+}
+
 static starts_with(str, prefix) {
 	auto l1 = strlen(str);
 	auto l2 = strlen(prefix);
@@ -155,4 +167,17 @@ static getNthWord(s, n) {
 		if (p1 < 0) p1 = strlen(s);
 	}
 	return substr(s, 0, p1);
+}
+
+static countWords(s) {
+	auto n = 0;
+	auto p1 = strstr(s, " ");
+	if (p1 < 0) p1 = strlen(s);
+	while (p1 > 0) {
+		n++;
+		s = substr(s, p1 + 1, -1);
+		p1 = strstr(s, " ");
+		if (p1 < 0) p1 = strlen(s);
+	}
+	return n;
 }
